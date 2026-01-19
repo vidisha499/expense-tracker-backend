@@ -100,8 +100,9 @@ const PORT = 8008;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors({
-  origin: 'http://localhost:8100', // your Ionic frontend
-  methods: ['GET', 'POST', 'DELETE', 'PUT']
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // --------------------
