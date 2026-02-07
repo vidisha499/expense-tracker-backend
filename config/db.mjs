@@ -1,34 +1,22 @@
-
-
 import mysql from 'mysql2';
+import dotenv from 'dotenv';
 
-// const db = mysql.createConnection({
-//   host: 'localhost',
-//   user: 'root',
-//   password: 'Vidhi@9689',
-//   database: 'expense_tracker'
-// });
+dotenv.config();
 
 const db = mysql.createConnection({
-  host: 'sql12.freesqldatabase.com',
-  user: 'sql12814504',
-  password: 'I1ZlIJBQDa',
-  database: 'sql12814504',
-  port: 3306
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASS,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT || 3306
 });
-
-
-
 
 db.connect((err) => {
   if (err) {
-    console.error('❌ MySQL connection failed:', err);
+    console.error('❌ MySQL connection failed:', err.message);
   } else {
-    console.log('✅ MySQL Connected');
+    console.log('✅ Connected to database using .env variables');
   }
 });
 
 export default db;
-
-
-
