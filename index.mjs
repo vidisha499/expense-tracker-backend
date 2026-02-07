@@ -165,16 +165,41 @@ app.get('/', (req, res) => {
   res.send('✅ Backend is running!');
 });
 
-app.post('/register', (req, res) => {
-  const { name, email, password } = req.body;
+// app.post('/register', (req, res) => {
+//   const { name, email, password } = req.body;
 
-  if (!name || !email || !password) {
-    return res.status(400).json({ message: 'All fields are required' });
+//   if (!name || !email || !password) {
+//     return res.status(400).json({ message: 'All fields are required' });
+//   }
+
+//   const sql = 'INSERT INTO users (name, email, password) VALUES (?, ?, ?)';
+
+//   db.query(sql, [name, email, password], (err, result) => {
+//     if (err) {
+//       console.error(err);
+//       return res.status(500).json(err);
+//     }
+
+//     res.status(201).json({
+//       message: 'User registered successfully',
+//       userId: result.insertId
+//     });
+//   });
+// });
+
+app.post('/register', (req, res) => {
+  // 1. Only pull email and password from the request
+  const { email, password } = req.body;
+
+  // 2. Only check if email and password exist
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Email and password are required' });
   }
 
-  const sql = 'INSERT INTO users (name, email, password) VALUES (?, ?, ?)';
+  // 3. Update the SQL to match your table columns (id is usually auto-increment)
+  const sql = 'INSERT INTO users (email, password) VALUES (?, ?)';
 
-  db.query(sql, [name, email, password], (err, result) => {
+  db.query(sql, [email, password], (err, result) => {
     if (err) {
       console.error(err);
       return res.status(500).json(err);
