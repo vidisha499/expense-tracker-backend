@@ -6,10 +6,10 @@ import dotenv from 'dotenv';
 dotenv.config(); // This MUST be called before const db
 
 const db = mysql.createPool({
-  host: process.env.DB_HOST || 'sql12.freesqldatabase.com',
-  user: process.env.DB_USER || 'sql12814504',
-  password: process.env.DB_PASS || 'I1ZlIJBQDa',
-  database: process.env.DB_NAME || 'sql12814504',
+  host: process.env.DB_HOST ,
+  user: process.env.DB_USER ,
+  password: process.env.DB_PASS ,
+  database: process.env.DB_NAME ,
   port: 3306,
   waitForConnections: true,
   connectionLimit: 10,   // Allows up to 10 connections at once
