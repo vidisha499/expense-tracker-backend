@@ -9,7 +9,7 @@ import db from './config/db.mjs'; // Using your updated Postgres connection
 dotenv.config();
 
 const app = express();
-const PORT = 8008;
+const PORT = process.env.PORT || 8008;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
