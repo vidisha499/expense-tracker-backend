@@ -1,37 +1,13 @@
 // index.mjs
+
+
 import express from 'express';
 import cors from 'cors';
-import mysql from 'mysql2';
 import dotenv from 'dotenv';
-dotenv.config(); // This MUST be called before const db
+import db from './config/db.mjs'; // Using your updated Postgres connection
 
-const db = mysql.createPool({
-  host: process.env.DB_HOST ,
-  user: process.env.DB_USER ,
-  password: process.env.DB_PASS ,
-  database: process.env.DB_NAME ,
-  port: 3306,
-  waitForConnections: true,
-  connectionLimit: 10,   // Allows up to 10 connections at once
-  queueLimit: 0,
-  enableKeepAlive: true, // Sends a ping to stop the "closed state" error
-  keepAliveInitialDelay: 10000
-});
+dotenv.config();
 
-// For Pools, we use .getConnection to test the link
-db.getConnection((err, connection) => {
-  if (err) {
-    console.error('❌ Database connection failed:', err.message);
-  } else {
-    console.log('✅ Connected to Cloud Database Pool');
-    connection.release(); // Release it back to the pool
-  }
-});
-
-
-// --------------------
-// Express App
-// --------------------
 const app = express();
 const PORT = 8008;
 
@@ -51,68 +27,57 @@ app.post('/test', (req, res) => {
   res.json({ message: 'POST received', body: req.body });
 });
 
-
-
-
-app.post('/login', (req, res) => {
+// --------------------
+// LOGIN
+// --------------------
+app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
-
-  // Log exactly what is arriving from the frontend
   console.log('--- Login Attempt ---');
-  console.log(`Email from Frontend: [${email}]`);
-  console.log(`Password from Frontend: [${password}]`);
+  
+  const sql = 'SELECT * FROM users WHERE email = $1'; // Postgres uses $1 instead of ?
 
-  const sql = 'SELECT * FROM users WHERE email = ?'; // Query by email first to see what we find
-
-  db.query(sql, [email], (err, results) => {
-    if (err) {
-      console.error('Database Error:', err);
-      return res.status(500).json({ message: 'Server error' });
-    }
-
-    if (results.length === 0) {
-      console.log('Result: No user found with that email.');
+  try {
+    const results = await db.query(sql, [email]);
+    
+    if (results.rows.length === 0) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
-    const user = results[0];
-    console.log(`User found in DB. Stored Password: [${user.password}]`);
-
-    // Compare strictly
+    const user = results.rows[0];
     if (user.password !== password) {
-      console.log('Result: Password mismatch!');
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
-    console.log('Result: Login Successful!');
     res.json({
       message: 'Login successful',
       user: { id: user.id, email: user.email }
     });
-  });
+  } catch (err) {
+    console.error('Database Error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
 });
 
-
-
-app.get('/expenses', (req, res) => {
-  console.log("hit expenses get api");
+// --------------------
+// GET EXPENSES
+// --------------------
+app.get('/api/expenses', async (req, res) => {
   const userId = req.query.user_id;
   if (!userId) return res.status(400).json({ message: 'user_id is required' });
 
-  const sql = 'SELECT * FROM expenses WHERE user_id = ? ORDER BY id DESC';
-  db.query(sql, [userId], (err, results) => {
-    if (err) return res.status(500).json(err);
-    res.json(results); // Results will now include the 'remark' column
-  });
+  const sql = 'SELECT * FROM expenses WHERE user_id = $1 ORDER BY id DESC';
+  try {
+    const results = await db.query(sql, [userId]);
+    res.json(results.rows);
+  } catch (err) {
+    res.status(500).json(err);
+  }
 });
 
-
-
-
-
-
-
-app.post('/expenses', (req, res) => {
+// --------------------
+// ADD EXPENSE
+// --------------------
+app.post('/api/expenses', async (req, res) => {
   const {
     user_id,
     expense_name,
@@ -126,152 +91,122 @@ app.post('/expenses', (req, res) => {
 
   if (!user_id) return res.status(400).json({ message: 'user_id is required' });
 
-
   const sql = `
     INSERT INTO expenses
     (user_id, expense_name, amount, expense_done_by, category, expense_date, payment_mode, remark)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    RETURNING id
   `;
 
-  db.query(
-    sql,
-    [user_id, expense_name, amount, expense_done_by, category, expense_date, payment_mode, remark],
-    (err, result) => {
-      if (err) return res.status(500).json(err);
-      res.status(201).json({
-        message: 'Expense added successfully',
-        id: result.insertId 
-      });
-    }
-  );
+  try {
+    const result = await db.query(sql, [user_id, expense_name, amount, expense_done_by, category, expense_date, payment_mode, remark]);
+    res.status(201).json({
+      message: 'Expense added successfully',
+      id: result.rows[0].id 
+    });
+  } catch (err) {
+    res.status(500).json(err);
+  }
 });
 
-
 // --------------------
-// DELETE expense by ID
+// DELETE EXPENSE
 // --------------------
-app.delete('/expenses/:id', (req, res) => {
-  const sql = 'DELETE FROM expenses WHERE id = ?';
-  db.query(sql, [req.params.id], (err) => {
-    if (err) return res.status(500).json(err);
+app.delete('/api/expenses/:id', async (req, res) => {
+  const sql = 'DELETE FROM expenses WHERE id = $1';
+  try {
+    await db.query(sql, [req.params.id]);
     res.json({ message: 'Expense deleted successfully' });
-  });
+  } catch (err) {
+    res.status(500).json(err);
+  }
 });
 
 // --------------------
-// Test GET root
+// REGISTER
 // --------------------
-app.get('/', (req, res) => {
-  res.send('✅ Backend is running!');
-});
-
-// app.post('/register', (req, res) => {
-//   const { name, email, password } = req.body;
-
-//   if (!name || !email || !password) {
-//     return res.status(400).json({ message: 'All fields are required' });
-//   }
-
-//   const sql = 'INSERT INTO users (name, email, password) VALUES (?, ?, ?)';
-
-//   db.query(sql, [name, email, password], (err, result) => {
-//     if (err) {
-//       console.error(err);
-//       return res.status(500).json(err);
-//     }
-
-//     res.status(201).json({
-//       message: 'User registered successfully',
-//       userId: result.insertId
-//     });
-//   });
-// });
-
-app.post('/register', (req, res) => {
-  // 1. Only pull email and password from the request
+app.post('/api/register', async (req, res) => {
   const { email, password } = req.body;
 
-  // 2. Only check if email and password exist
   if (!email || !password) {
     return res.status(400).json({ message: 'Email and password are required' });
   }
 
-  // 3. Update the SQL to match your table columns (id is usually auto-increment)
-  const sql = 'INSERT INTO users (email, password) VALUES (?, ?)';
+  const sql = 'INSERT INTO users (email, password) VALUES ($1, $2) RETURNING id';
 
-  db.query(sql, [email, password], (err, result) => {
-    if (err) {
-      console.error(err);
-      return res.status(500).json(err);
-    }
-
+  try {
+    const result = await db.query(sql, [email, password]);
     res.status(201).json({
       message: 'User registered successfully',
-      userId: result.insertId
+      userId: result.rows[0].id
     });
-  });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json(err);
+  }
 });
 
-
-app.put('/api/profile/:id', (req, res) => {
+// --------------------
+// UPDATE PROFILE
+// --------------------
+app.put('/api/profile/:id', async (req, res) => {
   const userId = req.params.id;
   const { email, phone } = req.body;
 
-  const sql = 'UPDATE users SET email = ?, phone = ? WHERE id = ?';
+  const sql = 'UPDATE users SET email = $1, phone = $2 WHERE id = $3';
 
-  db.query(sql, [email || null, phone || null, userId], (err, result) => {
-    if (err) {
-      console.error('❌ SQL Error:', err.sqlMessage);
-      return res.status(500).json({ message: 'Failed to update profile' });
-    }
+  try {
+    await db.query(sql, [email || null, phone || null, userId]);
     res.json({ message: 'Profile updated successfully' });
-  });
+  } catch (err) {
+    console.error('❌ SQL Error:', err.message);
+    res.status(500).json({ message: 'Failed to update profile' });
+  }
 });
 
 // --------------------
-// GET USER PROFILE
+// GET PROFILE
 // --------------------
-app.get('/api/profile/:id', (req, res) => {
+app.get('/api/profile/:id', async (req, res) => {
   const userId = req.params.id;
-  const sql = 'SELECT email, phone FROM users WHERE id = ?';
+  const sql = 'SELECT email, phone FROM users WHERE id = $1';
 
-  db.query(sql, [userId], (err, results) => {
-    if (err) return res.status(500).json(err);
-    if (results.length === 0) return res.status(404).json({ message: 'User not found' });
-    res.json(results[0]);
-  });
+  try {
+    const results = await db.query(sql, [userId]);
+    if (results.rows.length === 0) return res.status(404).json({ message: 'User not found' });
+    res.json(results.rows[0]);
+  } catch (err) {
+    res.status(500).json(err);
+  }
 });
 
 // --------------------
 // CHANGE PASSWORD
-// POST /api/profile/:id/change-password
 // --------------------
-app.put('/api/profile/:id/change-password', (req, res) => {
+app.put('/api/profile/:id/change-password', async (req, res) => {
   const userId = req.params.id;
   const { oldPassword, newPassword } = req.body;
 
-  // First, verify the old password
-  const checkSql = 'SELECT password FROM users WHERE id = ?';
-  db.query(checkSql, [userId], (err, results) => {
-    if (err || results.length === 0 || results[0].password !== oldPassword) {
+  try {
+    const checkSql = 'SELECT password FROM users WHERE id = $1';
+    const results = await db.query(checkSql, [userId]);
+
+    if (results.rows.length === 0 || results.rows[0].password !== oldPassword) {
       return res.status(401).json({ message: 'Current password incorrect' });
     }
 
-    // If correct, update to new password
-    const updateSql = 'UPDATE users SET password = ? WHERE id = ?';
-    db.query(updateSql, [newPassword, userId], (err) => {
-      if (err) return res.status(500).json({ message: 'Update failed' });
-      res.json({ message: 'Password updated successfully' });
-    });
-  });
+    const updateSql = 'UPDATE users SET password = $1 WHERE id = $2';
+    await db.query(updateSql, [newPassword, userId]);
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    res.status(500).json({ message: 'Update failed' });
+  }
 });
 
+app.get('/', (req, res) => {
+  res.send('✅ Backend is running with NeonDB!');
+});
 
-// --------------------
-// Start Server
-// --------------------
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
-
-
