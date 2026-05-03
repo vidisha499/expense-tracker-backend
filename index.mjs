@@ -5,6 +5,16 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import db from './config/db.mjs'; // Using your updated Postgres connection
+import nodemailer from 'nodemailer';
+
+// --- EMAIL CONFIGURATION ---
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER || 'eshikapakhale@gmail.com',
+    pass: process.env.EMAIL_PASS || 'aufnnbtxkyjydvsj'
+  }
+});
 
 dotenv.config();
 
@@ -28,6 +38,7 @@ const initDb = async () => {
         first_name VARCHAR(100),
         last_name VARCHAR(100),
         phone VARCHAR(20),
+        profile_image TEXT, -- Base64 image string
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -54,6 +65,9 @@ const initDb = async () => {
       'ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(100)',
       'ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(100)',
       'ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)',
+      'ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image TEXT',
+      'ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_otp VARCHAR(10)',
+      'ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_otp_expiry TIMESTAMP',
       'ALTER TABLE expenses ADD COLUMN IF NOT EXISTS expense_done_by VARCHAR(100)',
       'ALTER TABLE expenses ADD COLUMN IF NOT EXISTS category VARCHAR(100)',
       'ALTER TABLE expenses ADD COLUMN IF NOT EXISTS expense_date DATE',
@@ -265,14 +279,14 @@ app.post('/api/register', async (req, res) => {
 // --------------------
 app.put('/api/profile/:id', async (req, res) => {
   const userId = req.params.id;
-  const { email, phone, first_name, last_name } = req.body;
+  const { email, phone, first_name, last_name, profile_image } = req.body;
   
-  console.log(`🚀 Updating Profile for User ${userId}:`, { email, phone, first_name, last_name });
+  console.log(`🚀 Updating Profile for User ${userId}:`, { email, phone, first_name, last_name, hasImage: !!profile_image });
 
-  const sql = 'UPDATE users SET email = $1, phone = $2, first_name = $3, last_name = $4 WHERE id = $5';
+  const sql = 'UPDATE users SET email = $1, phone = $2, first_name = $3, last_name = $4, profile_image = $5 WHERE id = $6';
 
   try {
-    const result = await db.query(sql, [email || null, phone || null, first_name || null, last_name || null, userId]);
+    const result = await db.query(sql, [email || null, phone || null, first_name || null, last_name || null, profile_image || null, userId]);
     console.log(`✅ Profile updated. Rows affected: ${result.rowCount}`);
     res.json({ message: 'Profile updated successfully' });
   } catch (err) {
@@ -286,7 +300,7 @@ app.put('/api/profile/:id', async (req, res) => {
 // --------------------
 app.get('/api/profile/:id', async (req, res) => {
   const userId = req.params.id;
-  const sql = 'SELECT email, phone, first_name, last_name FROM users WHERE id = $1';
+  const sql = 'SELECT email, phone, first_name, last_name, profile_image FROM users WHERE id = $1';
 
   try {
     const results = await db.query(sql, [userId]);
@@ -320,6 +334,93 @@ app.put('/api/profile/:id/change-password', async (req, res) => {
     res.json({ message: 'Password updated successfully' });
   } catch (err) {
     res.status(500).json({ message: 'Update failed' });
+  }
+});
+
+// --------------------
+// FORGOT PASSWORD
+// --------------------
+app.post('/api/forgot-password/request', async (req, res) => {
+  const { phone } = req.body;
+  if (!phone) return res.status(400).json({ message: 'Phone number is required' });
+
+  try {
+    const userResult = await db.query('SELECT id, email, first_name FROM users WHERE phone = $1', [phone]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: 'No account found with this mobile number' });
+    }
+
+    const user = userResult.rows[0];
+    if (!user.email) {
+      return res.status(400).json({ message: 'No email associated with this account' });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiry = new Date(Date.now() + 10 * 60000); // 10 minutes from now
+
+    await db.query('UPDATE users SET reset_otp = $1, reset_otp_expiry = $2 WHERE id = $3', [otp, expiry, user.id]);
+
+    const mailOptions = {
+      from: 'Expense Tracker <eshikapakhale@gmail.com>',
+      to: user.email,
+      subject: 'Password Reset OTP - Expense Tracker',
+      html: `<h3>Hello ${user.first_name || 'User'},</h3><p>Your OTP for password reset is <strong>${otp}</strong>.</p><p>This OTP is valid for 10 minutes. Do not share this with anyone.</p>`
+    };
+
+    await transporter.sendMail(mailOptions);
+    
+    // Mask email for security (e.g., e***@gmail.com)
+    const [name, domain] = user.email.split('@');
+    const maskedEmail = name[0] + '*'.repeat(name.length > 1 ? name.length - 1 : 1) + '@' + domain;
+    
+    res.json({ message: 'OTP sent successfully', maskedEmail, email: user.email }); 
+  } catch (err) {
+    console.error('Forgot Password Request Error:', err);
+    res.status(500).json({ message: 'Failed to process request. Check email configuration.' });
+  }
+});
+
+app.post('/api/forgot-password/verify', async (req, res) => {
+  const { email, otp } = req.body;
+  if (!email || !otp) return res.status(400).json({ message: 'Email and OTP are required' });
+
+  try {
+    const result = await db.query('SELECT reset_otp, reset_otp_expiry FROM users WHERE email = $1', [email]);
+    if (result.rows.length === 0) return res.status(404).json({ message: 'User not found' });
+
+    const user = result.rows[0];
+    if (user.reset_otp !== otp) {
+      return res.status(400).json({ message: 'Invalid OTP' });
+    }
+    if (new Date() > new Date(user.reset_otp_expiry)) {
+      return res.status(400).json({ message: 'OTP has expired' });
+    }
+
+    res.json({ message: 'OTP verified successfully' });
+  } catch (err) {
+    console.error('Verify OTP Error:', err);
+    res.status(500).json({ message: 'Failed to verify OTP' });
+  }
+});
+
+app.post('/api/forgot-password/reset', async (req, res) => {
+  const { email, otp, newPassword } = req.body;
+  if (!email || !otp || !newPassword) return res.status(400).json({ message: 'Missing required fields' });
+
+  try {
+    const result = await db.query('SELECT reset_otp, reset_otp_expiry FROM users WHERE email = $1', [email]);
+    if (result.rows.length === 0) return res.status(404).json({ message: 'User not found' });
+
+    const user = result.rows[0];
+    if (user.reset_otp !== otp || new Date() > new Date(user.reset_otp_expiry)) {
+      return res.status(400).json({ message: 'Invalid or expired OTP' });
+    }
+
+    await db.query('UPDATE users SET password = $1, reset_otp = NULL, reset_otp_expiry = NULL WHERE email = $2', [newPassword, email]);
+    res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    console.error('Reset Password Error:', err);
+    res.status(500).json({ message: 'Failed to reset password' });
   }
 });
 
