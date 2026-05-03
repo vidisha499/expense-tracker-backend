@@ -11,13 +11,26 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 8008;
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(cors()); // Simplified CORS for maximum compatibility
+
+// --- DATABASE INITIALIZATION ---
+const initDb = async () => {
+  try {
+    console.log('--- Initializing Database ---');
+    await db.query(`
+      ALTER TABLE users 
+      ADD COLUMN IF NOT EXISTS first_name VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS last_name VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS phone VARCHAR(20)
+    `);
+    console.log('✅ Users table columns verified');
+  } catch (err) {
+    console.error('❌ Database Initialization Error:', err);
+  }
+};
+initDb();
 
 // --------------------
 // Debug /test POST
@@ -34,7 +47,7 @@ app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   console.log('--- Login Attempt ---');
   
-  const sql = 'SELECT * FROM users WHERE email = $1'; // Postgres uses $1 instead of ?
+  const sql = 'SELECT * FROM users WHERE email ILIKE $1'; // Case-insensitive match with ILIKE
 
   try {
     const results = await db.query(sql, [email]);
@@ -86,24 +99,77 @@ app.post('/api/expenses', async (req, res) => {
     category,
     expense_date,
     payment_mode,
-    remark 
+    remark,
+    bills
   } = req.body;
 
   if (!user_id) return res.status(400).json({ message: 'user_id is required' });
 
   const sql = `
     INSERT INTO expenses
-    (user_id, expense_name, amount, expense_done_by, category, expense_date, payment_mode, remark)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    (user_id, expense_name, amount, expense_done_by, category, expense_date, payment_mode, remark, bills)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING id
   `;
 
   try {
-    const result = await db.query(sql, [user_id, expense_name, amount, expense_done_by, category, expense_date, payment_mode, remark]);
+    console.log('Adding Expense with bills:', bills ? bills.length : 0);
+    const result = await db.query(sql, [
+      user_id, 
+      expense_name, 
+      amount, 
+      expense_done_by, 
+      category, 
+      expense_date, 
+      payment_mode, 
+      remark,
+      bills ? JSON.stringify(bills) : '[]' // Ensure it's never null/empty
+    ]);
     res.status(201).json({
       message: 'Expense added successfully',
       id: result.rows[0].id 
     });
+  } catch (err) {
+    res.status(500).json(err);
+  }
+});
+
+// --------------------
+// UPDATE EXPENSE
+// --------------------
+app.put('/api/expenses/:id', async (req, res) => {
+  const { id } = req.params;
+  const {
+    expense_name,
+    amount,
+    expense_done_by,
+    category,
+    expense_date,
+    payment_mode,
+    remark,
+    bills
+  } = req.body;
+
+  const sql = `
+    UPDATE expenses
+    SET expense_name = $1, amount = $2, expense_done_by = $3, category = $4, 
+        expense_date = $5, payment_mode = $6, remark = $7, bills = $8
+    WHERE id = $9
+  `;
+
+  try {
+    await db.query(sql, [
+      expense_name, 
+      amount, 
+      expense_done_by, 
+      category, 
+      expense_date, 
+      payment_mode, 
+      remark, 
+      bills ? JSON.stringify(bills) : null,
+      id
+    ]);
+    res.json({ message: 'Expense updated successfully' });
   } catch (err) {
     res.status(500).json(err);
   }
@@ -126,23 +192,30 @@ app.delete('/api/expenses/:id', async (req, res) => {
 // REGISTER
 // --------------------
 app.post('/api/register', async (req, res) => {
-  const { email, password } = req.body;
+  const { firstName, lastName, email, mobileNumber, password } = req.body;
 
   if (!email || !password) {
     return res.status(400).json({ message: 'Email and password are required' });
   }
 
-  const sql = 'INSERT INTO users (email, password) VALUES ($1, $2) RETURNING id';
+  const sql = `
+    INSERT INTO users (first_name, last_name, email, phone, password) 
+    VALUES ($1, $2, $3, $4, $5) 
+    RETURNING id
+  `;
 
   try {
-    const result = await db.query(sql, [email, password]);
+    const result = await db.query(sql, [firstName || null, lastName || null, email, mobileNumber || null, password]);
     res.status(201).json({
       message: 'User registered successfully',
       userId: result.rows[0].id
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json(err);
+    console.error('❌ Registration Error:', err);
+    if (err.code === '23505') { // PostgreSQL unique violation code
+      return res.status(400).json({ message: 'Email already exists' });
+    }
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
@@ -151,15 +224,18 @@ app.post('/api/register', async (req, res) => {
 // --------------------
 app.put('/api/profile/:id', async (req, res) => {
   const userId = req.params.id;
-  const { email, phone } = req.body;
+  const { email, phone, first_name, last_name } = req.body;
+  
+  console.log(`🚀 Updating Profile for User ${userId}:`, { email, phone, first_name, last_name });
 
-  const sql = 'UPDATE users SET email = $1, phone = $2 WHERE id = $3';
+  const sql = 'UPDATE users SET email = $1, phone = $2, first_name = $3, last_name = $4 WHERE id = $5';
 
   try {
-    await db.query(sql, [email || null, phone || null, userId]);
+    const result = await db.query(sql, [email || null, phone || null, first_name || null, last_name || null, userId]);
+    console.log(`✅ Profile updated. Rows affected: ${result.rowCount}`);
     res.json({ message: 'Profile updated successfully' });
   } catch (err) {
-    console.error('❌ SQL Error:', err.message);
+    console.error('❌ SQL Update Error:', err.message);
     res.status(500).json({ message: 'Failed to update profile' });
   }
 });
@@ -169,13 +245,16 @@ app.put('/api/profile/:id', async (req, res) => {
 // --------------------
 app.get('/api/profile/:id', async (req, res) => {
   const userId = req.params.id;
-  const sql = 'SELECT email, phone FROM users WHERE id = $1';
+  const sql = 'SELECT email, phone, first_name, last_name FROM users WHERE id = $1';
 
   try {
     const results = await db.query(sql, [userId]);
     if (results.rows.length === 0) return res.status(404).json({ message: 'User not found' });
+    
+    console.log(`📥 DB Profile Result for User ${userId}:`, results.rows[0]);
     res.json(results.rows[0]);
   } catch (err) {
+    console.error('❌ SQL Fetch Error:', err.message);
     res.status(500).json(err);
   }
 });
