@@ -19,13 +19,25 @@ app.use(cors()); // Simplified CORS for maximum compatibility
 const initDb = async () => {
   try {
     console.log('--- Initializing Database ---');
+    // Ensure table exists and has all columns
     await db.query(`
-      ALTER TABLE users 
-      ADD COLUMN IF NOT EXISTS first_name VARCHAR(100),
-      ADD COLUMN IF NOT EXISTS last_name VARCHAR(100),
-      ADD COLUMN IF NOT EXISTS phone VARCHAR(20)
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        first_name VARCHAR(100),
+        last_name VARCHAR(100),
+        phone VARCHAR(20),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
     `);
-    console.log('✅ Users table columns verified');
+    
+    // Also try adding columns individually just in case the table existed without them
+    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(100)').catch(() => {});
+    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(100)').catch(() => {});
+    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)').catch(() => {});
+    
+    console.log('✅ Database schema verified');
   } catch (err) {
     console.error('❌ Database Initialization Error:', err);
   }
