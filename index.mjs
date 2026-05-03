@@ -19,7 +19,7 @@ app.use(cors()); // Simplified CORS for maximum compatibility
 const initDb = async () => {
   try {
     console.log('--- Initializing Database ---');
-    // Ensure table exists and has all columns
+    // Ensure users table exists
     await db.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -32,12 +32,41 @@ const initDb = async () => {
       )
     `);
     
-    // Also try adding columns individually just in case the table existed without them
-    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(100)').catch(() => {});
-    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(100)').catch(() => {});
-    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)').catch(() => {});
+    // Ensure expenses table exists
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS expenses (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        expense_name VARCHAR(255) NOT NULL,
+        amount DECIMAL(10,2) NOT NULL,
+        expense_done_by VARCHAR(100),
+        category VARCHAR(100),
+        expense_date DATE,
+        payment_mode VARCHAR(50),
+        remark TEXT,
+        bills TEXT, -- Stored as JSON string
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Individual column checks to be 100% safe
+    const columns = [
+      'ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(100)',
+      'ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(100)',
+      'ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)',
+      'ALTER TABLE expenses ADD COLUMN IF NOT EXISTS expense_done_by VARCHAR(100)',
+      'ALTER TABLE expenses ADD COLUMN IF NOT EXISTS category VARCHAR(100)',
+      'ALTER TABLE expenses ADD COLUMN IF NOT EXISTS expense_date DATE',
+      'ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payment_mode VARCHAR(50)',
+      'ALTER TABLE expenses ADD COLUMN IF NOT EXISTS remark TEXT',
+      'ALTER TABLE expenses ADD COLUMN IF NOT EXISTS bills TEXT'
+    ];
+
+    for (const sql of columns) {
+      await db.query(sql).catch(() => {});
+    }
     
-    console.log('✅ Database schema verified');
+    console.log('✅ Database schema verified (Users & Expenses)');
   } catch (err) {
     console.error('❌ Database Initialization Error:', err);
   }
