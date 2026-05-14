@@ -18,8 +18,9 @@ const transporter = nodemailer.createTransport({
     pass: process.env.EMAIL_PASS || 'aufnnbtxkyjydvsj'
   },
   tls: {
-    rejectUnauthorized: false // Helps with some hosting environments
-  }
+    rejectUnauthorized: false
+  },
+  family: 4 // Force IPv4 to avoid ENETUNREACH with IPv6 on some hosts
 });
 
 const app = express();
