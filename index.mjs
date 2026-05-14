@@ -4,19 +4,23 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+dotenv.config();
 import db from './config/db.mjs'; // Using your updated Postgres connection
 import nodemailer from 'nodemailer';
 
 // --- EMAIL CONFIGURATION ---
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // Use STARTTLS
   auth: {
     user: process.env.EMAIL_USER || 'eshikapakhale@gmail.com',
     pass: process.env.EMAIL_PASS || 'aufnnbtxkyjydvsj'
+  },
+  tls: {
+    rejectUnauthorized: false // Helps with some hosting environments
   }
 });
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 8008;
@@ -93,6 +97,10 @@ initDb();
 app.post('/test', (req, res) => {
   console.log('POST /test body:', req.body);
   res.json({ message: 'POST received', body: req.body });
+});
+
+app.get('/api/version', (req, res) => {
+  res.json({ version: '1.0.5', timestamp: new Date() });
 });
 
 // --------------------
@@ -376,7 +384,11 @@ app.post('/api/forgot-password/request', async (req, res) => {
     res.json({ message: 'OTP sent successfully', maskedEmail, email: user.email }); 
   } catch (err) {
     console.error('Forgot Password Request Error:', err);
-    res.status(500).json({ message: 'Failed to process request. Check email configuration.' });
+    res.status(500).json({ 
+      message: 'Failed to process request', 
+      error: err.message,
+      details: err.stack 
+    });
   }
 });
 
